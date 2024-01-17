@@ -1,9 +1,14 @@
 package kakapo
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/google/btree"
+)
 
 func TestOpen(t *testing.T) {
 	// Open()
+	btree.New(2)
 }
 
 func TestSet(t *testing.T) {
