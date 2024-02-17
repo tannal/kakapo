@@ -143,6 +143,7 @@ func (db DB) Delete(k string) {
 		Key:     k,
 		Deleted: true,
 	}
+
 	db.btree.ReplaceOrInsert(key)
 
 	// write to wal file
@@ -152,6 +153,22 @@ func (db DB) Delete(k string) {
 	}
 	db.walFile.WriteString(jsonData + "\n")
 
+	if db.btree.Len() >= db.max {
+		node2 := db.btree.DeleteMin()
+		for node2 != nil {
+			// write json to active file line 1
+
+			jsonData, err := node2.(node).toJson()
+			if err != nil {
+				panic(err)
+			}
+
+			// write to the begginning of the file
+			db.activeFile.WriteString(jsonData + "\n")
+			node2 = db.btree.DeleteMin()
+		}
+		db.walFile.Truncate(0)
+	}
 }
 
 func (db DB) Scan() []node {
