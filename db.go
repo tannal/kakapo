@@ -16,8 +16,9 @@ type DB struct {
 }
 
 type node struct {
-	Key string
-	Val string
+	Key     string
+	Val     string
+	Deleted bool
 }
 
 func (n node) toJson() (string, error) {
@@ -73,7 +74,8 @@ func Open() DB {
 
 func (db DB) Get(k string) string {
 	key1 := node{
-		Key: k,
+		Key:     k,
+		Deleted: false,
 	}
 	item := db.btree.Get(key1)
 
@@ -93,7 +95,7 @@ func (db DB) Get(k string) string {
 			if err != nil {
 				panic(err)
 			}
-			if n.Key == k {
+			if n.Key == k && !n.Deleted {
 				val = n.Val
 			}
 		}
@@ -109,14 +111,14 @@ func (db DB) Put(k string, v string) {
 		Val: v,
 	}
 
+	db.btree.ReplaceOrInsert(key)
+
 	// write to wal file
 	jsonData, err := key.toJson()
 	if err != nil {
 		panic(err)
 	}
 	db.walFile.WriteString(jsonData + "\n")
-
-	db.btree.ReplaceOrInsert(key)
 
 	if db.btree.Len() >= db.max {
 		node2 := db.btree.DeleteMin()
@@ -136,12 +138,58 @@ func (db DB) Put(k string, v string) {
 	}
 }
 
+func (db DB) Delete(k string) {
+	key := node{
+		Key:     k,
+		Deleted: true,
+	}
+	db.btree.ReplaceOrInsert(key)
+
+	// write to wal file
+	jsonData, err := key.toJson()
+	if err != nil {
+		panic(err)
+	}
+	db.walFile.WriteString(jsonData + "\n")
+
+}
+
 func (db DB) Scan() []node {
 	var pairs []node
 	db.btree.Ascend(func(item btree.Item) bool {
 		pairs = append(pairs, item.(node))
 		return true
 	})
+
+	// read from active file line by line and append to pairs array
+	db.activeFile.Seek(0, 0)
+	reader := bufio.NewReader(&db.activeFile)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			break
+		}
+		var n node
+		err = json.Unmarshal([]byte(line), &n)
+		if err != nil {
+			panic(err)
+		}
+		pairs = append(pairs, n)
+	}
+
+	// remove duplicates
+	seen := make(map[string]struct{}, len(pairs))
+	j := 0
+	for _, v := range pairs {
+		if _, ok := seen[v.Key]; ok {
+			continue
+		}
+		seen[v.Key] = struct{}{}
+		pairs[j] = v
+		j++
+	}
+	pairs = pairs[:j]
+
 	return pairs
 }
 
